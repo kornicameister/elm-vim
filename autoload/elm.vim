@@ -3,7 +3,7 @@ let s:errors = []
 function! s:elmOracle(...) abort
 	let l:project = finddir('elm-stuff/..', '.;')
 	if len(l:project) == 0
-		echoerr '`elm-stuff` not found! run `elm-package install` for autocomplete.'
+		echoerr '`elm-stuff` not found! run `elm install` for autocomplete.'
 		return []
 	endif
 
@@ -127,11 +127,12 @@ endf
 function! elm#Syntastic(input) abort
 	let l:fixes = []
 
-	let l:bin = 'elm-make'
+	let l:bin = 'elm'
+	let l:subcommand = 'make'
 	let l:format = '--report=json'
 	let l:input = shellescape(a:input)
 	let l:output = '--output=' . shellescape(syntastic#util#DevNull())
-	let l:command = l:bin . ' ' . l:format  . ' ' . l:input . ' ' . l:output
+	let l:command = l:bin . ' ' . l:subcommand . ' ' . l:format  . ' ' . l:input . ' ' . l:output
 	let l:reports = s:ExecuteInRoot(l:command)
 
 	for l:report in split(l:reports, '\n')
@@ -162,31 +163,75 @@ function! elm#Build(input, output, show_warnings) abort
 	let l:fixes = []
 	let l:rawlines = []
 
-	let l:bin = 'elm-make'
+	let l:bin = 'elm'
+	let l:subcommand = 'make'
 	let l:format = '--report=json'
 	let l:input = shellescape(a:input)
 	let l:output = '--output=' . shellescape(a:output)
-	let l:command = l:bin . ' ' . l:format  . ' ' . l:input . ' ' . l:output
+	let l:command = l:bin . ' ' . l:subcommand . ' ' . l:format  . ' ' . l:input . ' ' . l:output
 	let l:reports = s:ExecuteInRoot(l:command)
 
-	for l:report in split(l:reports, '\n')
-		if l:report[0] ==# '['
-			for l:error in elm#util#DecodeJSON(l:report)
-				if a:show_warnings == 0 && l:error.type ==? 'warning'
-				else
-					call add(s:errors, l:error)
-					call add(l:fixes, {'filename': l:error.file,
+	if l:reports !=# ''
+		let l:reports_jsonified = elm#util#DecodeJSON(l:reports)
+		" Check it is the json output that we're expecting
+		if l:reports_jsonified.type ==# 'compile-errors'
+
+			" Iterate over the reports in the output
+			for l:report in l:reports_jsonified.errors
+
+				" Iterate over the errors in the report
+				for l:error in l:report.problems
+
+					" Look at the 'message' entry in each 'problem'. The message entry
+					" is an array of pure strings and 'highlight' objects. The
+					" highlight objects have their contents in a 'string' attribute
+					let l:messages = l:error.message
+					let l:num_messages = len(l:messages)
+
+					let l:count = 0
+					let l:string_messages = []
+					" Loop over the messages treating array entries differently if they
+					" are a string versus, not a string.
+					while l:count < l:num_messages
+						let l:message = get(l:messages, l:count)
+						if type(l:message) == type("")
+							call add(l:string_messages, l:message)
+							call add(l:rawlines, l:message)
+						else
+							" Extract the content from the 'string' attribute of the
+							" highlight object
+							call add(l:string_messages, l:message.string)
+							call add(l:rawlines, l:message.string)
+						end
+
+						let l:count += 1
+					endwhile
+
+					" Extract the first line line of the error to use as the 'text'
+					" attribute in the quick fix display. We take the first entry from
+					" the messages array but that can have multiple lines in it so we
+					" split on '\n' and take the first part
+					let l:first_line = get(split(get(l:messages, 0), '\n'), 0)
+
+					" We store the full error in s:errors so that we can display that to
+					" the user if they request. The new lines are embedded in the
+					" entries so we just join on nothing.
+					let l:error_details = join(l:string_messages, "")
+
+					call add(s:errors, l:error_details)
+					call add(l:fixes, {
+								\'filename': l:report.path,
 								\'valid': 1,
-								\'type': (l:error.type ==? 'error') ? 'E' : 'W',
+								\'type': 'E',
 								\'lnum': l:error.region.start.line,
 								\'col': l:error.region.start.column,
-								\'text': l:error.overview})
-				endif
+								\'text': l:first_line})
+				endfor
 			endfor
 		else
 			call add(l:rawlines, l:report)
 		endif
-	endfor
+	endif
 
 	let l:details = join(l:rawlines, "\n")
 	let l:lines = split(l:details, "\n")
@@ -199,12 +244,6 @@ function! elm#Build(input, output, show_warnings) abort
 	if l:details ==# '' || l:details =~? '^Successfully.*'
 	else
 		call add(s:errors, {'overview': l:details, 'details': l:details})
-		call add(l:fixes, {'filename': expand('%', 1),
-					\'valid': 1,
-					\'type': 'E',
-					\'lnum': 0,
-					\'col': 0,
-					\'text': l:overview})
 	endif
 
 	return l:fixes
@@ -212,11 +251,11 @@ endf
 
 " Make the given file, or the current file if none is given.
 function! elm#Make(...) abort
-	if elm#util#CheckBin('elm-make', 'http://elm-lang.org/install') ==# ''
+	if elm#util#CheckBin('elm', 'http://elm-lang.org/install') ==# ''
 		return
 	endif
 
-	call elm#util#Echo('elm-make:', 'building...')
+	call elm#util#Echo('elm make:', 'building...')
 
 	let l:input = (a:0 == 0) ? expand('%:p') : a:1
 	let l:fixes = elm#Build(l:input, g:elm_make_output_file, g:elm_make_show_warnings)
@@ -245,10 +284,7 @@ function! elm#ErrorDetail() abort
 		let l:linenr = line('.')
 		exec ':wincmd p'
 		if len(s:errors) > 0
-			let l:detail = s:errors[l:linenr-1].details
-			if l:detail ==# ''
-				let l:detail = s:errors[l:linenr-1].overview
-			endif
+			let l:detail = s:errors[l:linenr-1]
 			echo l:detail
 		endif
 	endif
@@ -341,20 +377,17 @@ function! elm#Test() abort
 	endif
 endf
 
-" Returns the closest parent with an elm-package.json file.
+" Returns the closest parent with an elm.json file.
 function! elm#FindRootDirectory() abort
 	let l:elm_root = getbufvar('%', 'elmRoot')
 	if empty(l:elm_root)
 		let l:current_file = expand('%:p')
 		let l:dir_current_file = fnameescape(fnamemodify(l:current_file, ':h'))
-		let l:old_match = findfile('elm-package.json', l:dir_current_file . ';')
-		let l:new_match = findfile('elm.json', l:dir_current_file . ';')
-		if !empty(l:new_match)
-			let l:elm_root = fnamemodify(l:new_match, ':p:h')
-		elseif !empty(l:old_match)
-			let l:elm_root = fnamemodify(l:old_match, ':p:h')
-		else
+		let l:match = findfile('elm.json', l:dir_current_file . ';')
+		if empty(l:match)
 			let l:elm_root = ''
+		else
+			let l:elm_root = fnamemodify(l:match, ':p:h')
 		endif
 
 		if !empty(l:elm_root)

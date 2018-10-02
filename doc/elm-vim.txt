@@ -66,7 +66,7 @@ plugins.
     Copy all of the files into your `~/.vim` directory
 <
 
-Please be sure all necessary binaries are installed (such as `elm-make`,
+Please be sure all necessary binaries are installed (such as `elm`,
 `elm-doc`, `elm-reactor`, etc..) from http://elm-lang.org/. You may also want
 to install `elm-test` with 'npm install -g elm-test' if you want to run unit
 tests from within vim.
@@ -77,12 +77,12 @@ COMMANDS                                                         *elm-commands*
 
 :ElmMake [file]
 
-    ElmMake calls `elm-make` with the given {file}. If no {file} is given
+    ElmMake calls `elm make` with the given {file}. If no {file} is given
     it uses the current file being edited.
 
 :ElmMakeMain
 
-    ElmMakeMain attempts to call `elm-make` with "Main.elm".
+    ElmMakeMain attempts to call `elm make` with "Main.elm".
 
 :ElmTest [file]
 
