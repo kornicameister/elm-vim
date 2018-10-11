@@ -230,8 +230,8 @@ endfunction
 " Using the built-in :echoerr prints a stacktrace, which isn't that nice.
 " From: https://github.com/moll/vim-node/blob/master/autoload/node.vim
 function! s:error(msg)
-	echohl ErrorMsg
-	echomsg a:msg
-	echohl NONE
-	let v:errmsg = a:msg
+  echohl ErrorMsg
+  echomsg a:msg
+  echohl NONE
+  let v:errmsg = a:msg
 endfunction
