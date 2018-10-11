@@ -171,6 +171,16 @@ function! elm#Build(input, output, show_warnings) abort
   let l:command = l:bin . ' ' . l:subcommand . ' ' . l:format  . ' ' . l:input . ' ' . l:output
   let l:reports = s:ExecuteInRoot(l:command)
 
+  " If we hit the common 'elm: not enough bytes' error then we delete the
+  " elm-stuff directory and rebuild.
+  "
+  " As this is a bit dangerous we make it opt in via a config option
+  if l:reports =~? '^elm: not enough bytes.*' && g:elm_delete_elm_stuff_on_fail == 1
+    call elm#util#Echo('elm make:', 'deleting and rebuilding...')
+    call s:ExecuteInRoot('rm -fr ./elm-stuff')
+    let l:reports = s:ExecuteInRoot(l:command)
+  endif
+
   if l:reports !=# ''
     let l:reports_jsonified = elm#util#DecodeJSON(l:reports)
     " Check it is the json output that we're expecting
