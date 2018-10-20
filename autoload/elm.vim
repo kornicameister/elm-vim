@@ -203,11 +203,60 @@ function! elm#Build(input, output, bin) abort
           else
             return elm#Build(a:input, a:output, 'elm-test')
           endif
-        endif
-    endif
 
+        else
+          " If it isn't 'import Test' then assume it is just a general import
+          " error and report the file it happens in
+          let l:messages = l:json.message
+          let l:num_messages = len(l:messages)
+
+          let l:count = 0
+          let l:string_messages = []
+          " Loop over the messages treating array entries differently if they
+          " are a string versus, not a string.
+          while l:count < l:num_messages
+            let l:message = get(l:messages, l:count)
+            if type(l:message) == type("")
+              call add(l:string_messages, l:message)
+              call add(l:rawlines, l:message)
+            else
+              " Extract the content from the 'string' attribute of the
+              " highlight object
+              call add(l:string_messages, l:message.string)
+              call add(l:rawlines, l:message.string)
+            end
+
+            let l:count += 1
+          endwhile
+
+          " Extract the first line line of the error to use as the 'text'
+          " attribute in the quick fix display. We take the first entry from
+          " the messages array but that can have multiple lines in it so we
+          " split on '\n' and take the first part and then add the import name
+          " from the next entry of the messages
+          let l:intro = get(split(get(l:messages, 0), '\n'), 0)
+          let l:module_name = substitute(l:failed_import, 'import ', '', '')
+          let l:first_line = l:intro . ' ' . l:module_name
+
+          " We store the full error in s:errors so that we can display that to
+          " the user if they request. The new lines are embedded in the
+          " entries so we just join on nothing.
+          let l:error_details = join(l:string_messages, "")
+
+          " Use a pattern in the quick-fix entry so that we jump to the write
+          " line in the file. The error message does not provide a line number
+          let l:search_pattern = l:failed_import . '\( \|$\)'
+
+          call add(s:errors, l:error_details)
+          call add(l:fixes, {
+                \'filename': l:json.path,
+                \'valid': 1,
+                \'type': 'E',
+                \'pattern': l:search_pattern,
+                \'text': l:first_line})
+        endif
     " Check it is the json output that we're expecting
-    if l:json.type ==# 'compile-errors'
+    elseif l:json.type ==# 'compile-errors'
 
       " Iterate over the reports in the output
       for l:report in l:json.errors
