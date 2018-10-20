@@ -158,17 +158,16 @@ function! elm#Syntastic(input) abort
   return l:fixes
 endf
 
-function! elm#Build(input, output, show_warnings) abort
+function! elm#Build(input, output, bin) abort
   let s:errors = []
   let l:fixes = []
   let l:rawlines = []
 
-  let l:bin = 'elm'
   let l:subcommand = 'make'
   let l:format = '--report=json'
   let l:input = shellescape(a:input)
   let l:output = '--output=' . shellescape(a:output)
-  let l:command = l:bin . ' ' . l:subcommand . ' ' . l:format  . ' ' . l:input . ' ' . l:output
+  let l:command = a:bin . ' ' . l:subcommand . ' ' . l:format  . ' ' . l:input . ' ' . l:output
   let l:reports = s:ExecuteInRoot(l:command)
 
   " If we hit the common 'elm: not enough bytes' error then we delete the
@@ -182,12 +181,36 @@ function! elm#Build(input, output, show_warnings) abort
   endif
 
   if l:reports !=# ''
-    let l:reports_jsonified = elm#util#DecodeJSON(l:reports)
+    let l:json = elm#util#DecodeJSON(l:reports)
+
+    " Check to see if the error message is complaining about 'import Test'
+    " which means that we're trying to build a file which needs test
+    " dependencies and so we need to build with 'elm-test make' instead
+    "
+    " This could fail if there are other test dependencies and the compiler
+    " complains about one of these others first. It seems to be based on
+    " reverse source ordering of imports. Maybe there is a better approach?
+    " I'm not so keen on doing a check for the directory as it is possible to
+    " define tests outside the 'tests' directory as long as they are imported
+    " there, I believe.
+    if l:json.type ==# 'error' && l:json.title ==# 'UNKNOWN IMPORT'
+        let l:failed_import = get(l:json.message, 1).string
+        if l:failed_import ==# 'import Test'
+          " Simple check to try to prevent recursive loop
+          " if something goes wrong
+          if a:bin ==# 'elm-test'
+            return []
+          else
+            return elm#Build(a:input, a:output, 'elm-test')
+          endif
+        endif
+    endif
+
     " Check it is the json output that we're expecting
-    if l:reports_jsonified.type ==# 'compile-errors'
+    if l:json.type ==# 'compile-errors'
 
       " Iterate over the reports in the output
-      for l:report in l:reports_jsonified.errors
+      for l:report in l:json.errors
 
         " Iterate over the errors in the report
         for l:error in l:report.problems
@@ -266,7 +289,8 @@ function! elm#Make(...) abort
   call elm#util#Echo('elm make:', 'building...')
 
   let l:input = (a:0 == 0) ? expand('%:p') : a:1
-  let l:fixes = elm#Build(l:input, g:elm_make_output_file, g:elm_make_show_warnings)
+  let l:bin = 'elm' " assume we're not building a test file
+  let l:fixes = elm#Build(l:input, g:elm_make_output_file, 'elm')
 
   if len(l:fixes) > 0
     call elm#util#EchoWarning('', 'found ' . len(l:fixes) . ' errors')
