@@ -183,78 +183,15 @@ function! elm#Build(input, output, bin) abort
   if l:reports !=# ''
     let l:json = elm#util#DecodeJSON(l:reports)
 
-    " Check to see if the error message is complaining about 'import Test'
-    " which means that we're trying to build a file which needs test
-    " dependencies and so we need to build with 'elm-test make' instead
+    " Check to see if the error message is complaining about an unknown
+    " import. In which case we assume we're in a test file and so should
+    " compile with 'elm-test' instead.
     "
-    " This could fail if there are other test dependencies and the compiler
-    " complains about one of these others first. It seems to be based on
-    " reverse source ordering of imports. Maybe there is a better approach?
-    " I'm not so keen on doing a check for the directory as it is possible to
-    " define tests outside the 'tests' directory as long as they are imported
-    " there, I believe.
-    if l:json.type ==# 'error' && l:json.title ==# 'UNKNOWN IMPORT'
-        let l:failed_import = get(l:json.message, 1).string
-        if l:failed_import ==# 'import Test'
-          " Simple check to try to prevent recursive loop
-          " if something goes wrong
-          if a:bin ==# 'elm-test'
-            return []
-          else
-            return elm#Build(a:input, a:output, 'elm-test')
-          endif
-
-        else
-          " If it isn't 'import Test' then assume it is just a general import
-          " error and report the file it happens in
-          let l:messages = l:json.message
-          let l:num_messages = len(l:messages)
-
-          let l:count = 0
-          let l:string_messages = []
-          " Loop over the messages treating array entries differently if they
-          " are a string versus, not a string.
-          while l:count < l:num_messages
-            let l:message = get(l:messages, l:count)
-            if type(l:message) == type("")
-              call add(l:string_messages, l:message)
-              call add(l:rawlines, l:message)
-            else
-              " Extract the content from the 'string' attribute of the
-              " highlight object
-              call add(l:string_messages, l:message.string)
-              call add(l:rawlines, l:message.string)
-            end
-
-            let l:count += 1
-          endwhile
-
-          " Extract the first line line of the error to use as the 'text'
-          " attribute in the quick fix display. We take the first entry from
-          " the messages array but that can have multiple lines in it so we
-          " split on '\n' and take the first part and then add the import name
-          " from the next entry of the messages
-          let l:intro = get(split(get(l:messages, 0), '\n'), 0)
-          let l:module_name = substitute(l:failed_import, 'import ', '', '')
-          let l:first_line = l:intro . ' ' . l:module_name
-
-          " We store the full error in s:errors so that we can display that to
-          " the user if they request. The new lines are embedded in the
-          " entries so we just join on nothing.
-          let l:error_details = join(l:string_messages, "")
-
-          " Use a pattern in the quick-fix entry so that we jump to the write
-          " line in the file. The error message does not provide a line number
-          let l:search_pattern = l:failed_import . '\( \|$\)'
-
-          call add(s:errors, l:error_details)
-          call add(l:fixes, {
-                \'filename': l:json.path,
-                \'valid': 1,
-                \'type': 'E',
-                \'pattern': l:search_pattern,
-                \'text': l:first_line})
-        endif
+    " There are situations where you might have an unknown import in a
+    " non-test file but I would hope there error in that case would be the
+    " same in 'elm-test' too.
+    if a:bin !=# 'elm-test' && l:json.type ==# 'error' && l:json.title ==# 'UNKNOWN IMPORT'
+      return elm#Build(a:input, a:output, 'elm-test')
     " Check it is the json output that we're expecting
     elseif l:json.type ==# 'compile-errors'
 
